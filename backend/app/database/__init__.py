@@ -7,6 +7,11 @@ from app.database.models import (
     SourceDocument,
     User,
 )
+from app.database.supabase import (
+    get_supabase_admin_client,
+    get_supabase_anon_client,
+    get_supabase_user_client,
+)
 
 __all__ = [
     "Base",
@@ -16,4 +21,7 @@ __all__ = [
     "MessageCitation",
     "SourceDocument",
     "User",
+    "get_supabase_admin_client",
+    "get_supabase_anon_client",
+    "get_supabase_user_client",
 ]

@@ -6,6 +6,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.schema import FetchedValue
 
 from app.config import settings
 from app.database.base import Base
@@ -42,9 +43,11 @@ class DocumentChunk(Base):
         nullable=True,
     )
 
-    # Postgres full-text search vector
+    # Postgres full-text search vector (generated always column in DB)
     search_vector: Mapped[Any | None] = mapped_column(
         TSVECTOR,
+        server_default=FetchedValue(),
+        server_onupdate=FetchedValue(),
         nullable=True,
     )
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

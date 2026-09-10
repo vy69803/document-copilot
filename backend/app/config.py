@@ -2,7 +2,7 @@ import os
 from functools import cached_property
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,13 +27,44 @@ class Settings(BaseSettings):
     # --- LLM & Embeddings (Gemini / OpenAI) ---
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
-    llm_model: str = "gemini-2.5-flash"
-    embedding_model: str = "text-embedding-004"
+    llm_model: str = "gemini-3.6-flash"
+    embedding_model: str = "gemini-embedding-001"
     embedding_dimensions: int = 768
 
     # Legacy / OpenAI aliases if specified in .env
+    openai_chat_model: str = "gpt-4o"
     openai_embedding_model: str | None = None
     openai_embedding_dimensions: int | None = None
+
+    # --- Agent Execution ---
+    agent_request_limit: int = 10
+    agent_temperature: float = 0.0
+
+    # --- Retrieval Pipeline ---
+    retrieval_candidate_k: int = Field(
+        default=30,
+        validation_alias=AliasChoices("retrieval_candidate_k", "candidate_k"),
+    )
+    retrieval_top_k: int = Field(
+        default=8,
+        validation_alias=AliasChoices("retrieval_top_k", "top_k"),
+    )
+    retrieval_rrf_k: int = Field(
+        default=60,
+        validation_alias=AliasChoices("retrieval_rrf_k", "rrf_k"),
+    )
+    retrieval_neighbor_radius: int = Field(
+        default=1,
+        validation_alias=AliasChoices(
+            "retrieval_neighbor_radius", "neighbor_radius", "neighbor_window"
+        ),
+    )
+    retrieval_fts_config: str = Field(
+        default="english",
+        validation_alias=AliasChoices(
+            "retrieval_fts_config", "fts_config", "fts_language"
+        ),
+    )
 
     # --- Server / CORS ---
     # Comma-separated list in .env; parsed by the `cors_origins` property
