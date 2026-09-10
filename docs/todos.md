@@ -1,0 +1,185 @@
+# Document Copilot — Implementation Checklist
+
+This checklist tracks the step-by-step implementation of **Document Copilot** for Driftwood Capital, based on [client-brief.md](client-brief.md), [architecture.md](architecture.md), and [AGENTS.md](../AGENTS.md).
+
+---
+
+## Strategy: Where to Start & Why
+
+### The Logical Sequence: **Data & Backend Foundation First**
+
+1. **Why Backend & Database First:**
+   - Document Copilot's entire value proposition is **trust, grounding, and accurate SEC citation**. The core risk is hallucination and citation failure ("a wrong but confident answer is worse than no answer").
+   - The data model (`source_documents`, `document_chunks`, `embeddings`, `tsvectors`, `chat_threads`, `citations`) defines the contracts for both ingestion and the frontend.
+   - Without ingested data and a working retrieval engine, the frontend would only be an empty shell with nothing to query.
+
+2. **Parallel Frontend Development:**
+   - Once the database schema, auth contracts, and streaming API endpoints (`POST /chat/stream`) are specified, the frontend can be scaffolded and wired to Supabase Auth in parallel.
+
+---
+
+## Phase 0: External Services & Data Preparation
+
+- [ ] **0.1 Supabase Project Setup**
+  - [ ] Create hosted Supabase project (see [docs/guides/supabase-setup.md](guides/supabase-setup.md))
+  - [ ] Record credentials in `.env`: Project URL, `anon` key, `service_role` key, direct Postgres connection string
+  - [ ] Configure Auth: Enable Email provider (disable "Confirm email" for local dev)
+- [ ] **0.2 SEC Sample Corpus Ingestion Download**
+  - [ ] Run `python data/download.py` from repository root
+  - [ ] Verify 10-K filings are downloaded for Apple, Amazon, Alphabet, Microsoft, and NVIDIA (FY 2021–2025)
+
+---
+
+## Phase 1: Backend Foundation & Database Schema
+
+- [x] **1.1 Backend Environment & Dependencies**
+  - [x] Initialize backend dependencies with `uv sync` (see [docs/guides/backend-setup.md](guides/backend-setup.md))
+  - [x] Add required libraries: `fastapi`, `uvicorn`, `pydantic`, `pydantic-settings`, `httpx`, `structlog`, `openai`, `supabase`, `pydantic-ai`, `sqlalchemy`, `alembic`, `psycopg[binary]`, `pgvector`
+  - [x] Add dev dependencies: `pytest`, `ruff`
+  - [x] Implement `app/config.py` using `pydantic-settings` (single source of truth for env vars; fail fast on missing keys)
+- [x] **1.2 Database Schema & Alembic Migrations**
+  - [x] Initialize Alembic in `backend/alembic` configured with `app.config.settings` and direct session connection
+  - [x] Define SQLAlchemy models in `app/database/models/`:
+    - [x] `users`: `id` (FK to `auth.users`), `email`, `created_at`
+    - [x] `source_documents`: `id`, `ticker`, `company_name`, `filing_type`, `fiscal_year`, `filing_date`, `accession_number`, `source_url`, `content_markdown`, `metadata`
+    - [x] `document_chunks`: `id`, `document_id`, `chunk_index`, `section`, `page`, `chunk_text`, `embedding` (vector), `search_vector` (`tsvector`), `token_count`, `metadata`
+    - [x] `chat_threads`: `id`, `user_id`, `title`, `created_at`, `updated_at`
+    - [x] `chat_messages`: `id`, `thread_id`, `role`, `content`, `message_metadata`, `created_at`
+    - [x] `message_citations`: `id`, `message_id`, `chunk_id`, `document_id`, `citation_index`, `excerpt`, `page`, `section`
+  - [x] Write initial Alembic migration (`uv run alembic revision --autogenerate` + explicit SQL):
+    - [x] `CREATE EXTENSION IF NOT EXISTS vector;`
+    - [x] Generated `tsvector` trigger/column for lexical full-text search
+    - [x] HNSW index on `document_chunks.embedding`
+    - [x] GIN index on `document_chunks.search_vector`
+    - [x] Row Level Security (RLS) policies for user data isolation
+  - [x] Run migration: `uv run alembic upgrade head`
+
+---
+
+## Phase 2: Ingestion & Document Processing Pipeline
+
+- [ ] **2.1 Document Parser & Markdown Normalizer (`backend/ingest/`)**
+  - [ ] Parse downloaded SEC 10-K HTML files into clean, structured Markdown
+  - [ ] Preserve section headings (Item 1 Business, Item 1A Risk Factors, Item 7 MD&A, Financial Statements)
+  - [ ] Extract filing metadata (ticker, fiscal year, filing date, accession number)
+- [ ] **2.2 Chunking & Context Enrichment**
+  - [ ] Implement hierarchical / section-aware chunking with token target (~500–1000 tokens per chunk with overlap)
+  - [ ] Enrich each chunk with filing metadata header (ticker, year, section, page)
+- [ ] **2.3 Embedding Generation & Database Storage**
+  - [ ] Generate OpenAI embeddings (`text-embedding-3-small` / 1536 dimensions) in batches
+  - [ ] Bulk upsert `source_documents` and `document_chunks` into Supabase Postgres
+  - [ ] Populate `search_vector` for full-text search
+  - [ ] Verify ingested chunk count, vector dimensions, and FTS indexing across all 5 companies (2021–2025)
+
+---
+
+## Phase 3: Hybrid Retrieval & Grounding Engine
+
+- [ ] **3.1 Semantic Search (`pgvector`)**
+  - [ ] Implement query vector embedding with OpenAI
+  - [ ] Implement cosine distance search against `document_chunks.embedding` in `app/retrieval/queries.py`
+- [ ] **3.2 Lexical Search (Postgres FTS)**
+  - [ ] Implement `websearch_to_tsquery` or `plainto_tsquery` against `document_chunks.search_vector`
+- [ ] **3.3 Reciprocal Rank Fusion (RRF)**
+  - [ ] Implement RRF algorithm in `app/retrieval/fusion.py` to merge semantic and keyword rankings
+  - [ ] Support filtering by ticker, fiscal year, and filing type
+  - [ ] Implement surrounding context / neighboring chunks retrieval for grounding
+- [ ] **3.4 Grounding Validator (`app/grounding/validator.py`)**
+  - [ ] Validate that all generated citations map directly to retrieved chunks
+  - [ ] Enforce "no citation, no claim" policy: fail or decline answer if passages do not support claims
+  - [ ] Write unit tests for RRF fusion, retrieval, and grounding validation
+
+---
+
+## Phase 4: Assistant Orchestration & Backend API
+
+- [ ] **4.1 Supabase Auth & JWT Verification**
+  - [ ] Implement `app/auth/dependencies.py` to validate `Authorization: Bearer <token>` against Supabase
+  - [ ] Create `get_current_user` FastAPI dependency
+- [ ] **4.2 PydanticAI Assistant Agent (`app/assistant/`)**
+  - [ ] Define agent dependencies in `deps.py` (`DocumentAgentDeps`: user, thread, retriever, grounding validator)
+  - [ ] Define structured output models in `outputs.py` (`GroundedAnswer`, `Citation`, `SourcePassage`)
+  - [ ] Provide system prompt in `instructions.md` enforcing Driftwood Capital rules:
+    - Ground strictly in retrieved passages
+    - Mandatory filing + section citations
+    - Explicit refusal when evidence is insufficient
+    - Zero speculative investment advice or stock recommendations
+- [ ] **4.3 Chat Endpoints & Streaming (`app/api/chat.py`)**
+  - [ ] Thread management endpoints: `GET /chat/threads`, `POST /chat/threads`, `GET /chat/threads/{id}/messages`
+  - [ ] Streaming endpoint: `POST /chat/stream` emitting AI SDK-compatible SSE events (text deltas, citations, finish events)
+  - [ ] Persist conversation turns (`chat_messages`, `message_citations`) after successful generation
+  - [ ] Implement CORS middleware and FastAPI lifespan handlers in `app/main.py`
+
+---
+
+## Phase 5: Frontend Foundation & Authentication
+
+- [ ] **5.1 Frontend Scaffolding & Tooling**
+  - [ ] Initialize Vite + React SPA with TypeScript in `frontend/` (see [docs/guides/frontend-setup.md](guides/frontend-setup.md))
+  - [ ] Configure `pnpm` with `.npmrc` (7-day release age check)
+  - [ ] Install dependencies: `react-router-dom`, `@supabase/supabase-js`, `@ai-sdk/react`, `ai`
+  - [ ] Setup Tailwind CSS & shadcn/ui CLI (`pnpm dlx shadcn@latest init`)
+  - [ ] Configure path alias `@/*` in `tsconfig.json` and `vite.config.ts`
+- [ ] **5.2 Configuration & HTTP Client**
+  - [ ] Implement `src/lib/env.ts` (validate `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+  - [ ] Implement `src/lib/supabase.ts` (browser Supabase client)
+  - [ ] Implement `src/lib/http.ts` & `src/lib/api.ts` (fetch wrapper with Supabase JWT bearer injection and typed `ApiError`)
+- [ ] **5.3 Authentication Flows**
+  - [ ] Build clean Driftwood login / signup page (`src/pages/auth/Login.tsx`) using Supabase email auth
+  - [ ] Setup Auth context / route guard to redirect unauthenticated analysts
+
+---
+
+## Phase 6: Frontend Chat & Citation Inspector UI
+
+- [ ] **6.1 App Layout & Thread Navigation**
+  - [ ] Build main layout with sidebar for past conversation threads (`src/components/layout/Sidebar.tsx`)
+  - [ ] Implement "New Chat" action and thread switching with React Router
+- [ ] **6.2 Streaming Chat Interface**
+  - [ ] Implement chat container using `@ai-sdk/react` (`useChat`) connected to `POST /chat/stream`
+  - [ ] Render assistant responses with real-time markdown streaming
+  - [ ] Display suggested analyst prompts (from client brief) in empty states
+- [ ] **6.3 Interactive Citation & Source Passage Inspector**
+  - [ ] Render inline citation badges (e.g., `[AAPL 2024 10-K, Item 7]`)
+  - [ ] Build slide-over drawer / modal to inspect exact source passage excerpts, fiscal year, and metadata in one click
+  - [ ] Add copy passage / copy quote action for analysts to paste into equity reports
+
+---
+
+## Phase 7: Verification against Client Brief & Testing
+
+- [ ] **7.1 Backend Unit & Integration Tests**
+  - [ ] Test hybrid search fusion logic (`tests/retrieval/test_fusion.py`)
+  - [ ] Test grounding validator with positive and negative assertion cases
+  - [ ] Test token validation and thread authorization checks
+- [ ] **7.2 Client Brief Benchmark Evaluation**
+  - Test the 10 representative analyst questions from [client-brief.md](client-brief.md):
+    - [ ] Apple revenue mix shift across iPhone, Services, Mac, iPad, Wearables (2021–2025)
+    - [ ] Amazon AWS operating income/margins vs. North America & International (2021–2025)
+    - [ ] NVIDIA Data Center demand drivers, customer concentration, and supply constraints
+    - [ ] Microsoft Azure & AI infrastructure capacity commentary
+    - [ ] Alphabet segment revenue trends (Search, YouTube, Cloud, Network)
+    - [ ] Risk-factor changes on AI, export controls, and supply chain across all 5 companies
+    - [ ] Apple vs. NVIDIA supplier concentration / third-party foundry language comparison
+    - [ ] CapEx & purchase commitment trends for hyperscalers (MSFT, GOOGL, AMZN, NVDA)
+    - [ ] Geographic revenue exposures in latest 10-Ks
+    - [ ] Negative test: GenAI margin proof question (verifying the bot refuses to infer beyond filings)
+- [ ] **7.3 Security & Boundaries Check**
+  - [ ] Confirm no service-role key leaks to frontend
+  - [ ] Confirm user thread isolation (analyst A cannot read analyst B's threads)
+  - [ ] Confirm frontend builds cleanly: `pnpm tsc --noEmit` and `pnpm build`
+
+---
+
+## Phase 8: Deployment & Operational Readiness
+
+- [ ] **8.1 Backend Deployment (Railway)**
+  - [ ] Verify `Dockerfile` / start command (`uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT`)
+  - [ ] Configure environment variables in Railway project
+  - [ ] Verify database migrations run cleanly against hosted Supabase
+- [ ] **8.2 Frontend Deployment (Railway)**
+  - [ ] Configure static build output / web server for React SPA
+  - [ ] Set `VITE_API_BASE_URL` pointing to the deployed backend
+- [ ] **8.3 Pilot Handover**
+  - [ ] Onboard pilot group (5 senior analysts) with Driftwood credentials
+  - [ ] Validate 3-hour weekly intake time savings goal
