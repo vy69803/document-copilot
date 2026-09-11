@@ -212,13 +212,25 @@ This checklist tracks the step-by-step implementation of **Document Copilot** fo
 
 ## Phase 8: Deployment & Operational Readiness
 
-- [ ] **8.1 Backend Deployment (Railway)**
-  - [ ] Verify `Dockerfile` / start command (`uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT`)
-  - [ ] Configure environment variables in Railway project
-  - [ ] Verify database migrations run cleanly against hosted Supabase
-- [ ] **8.2 Frontend Deployment (Railway)**
-  - [ ] Configure static build output / web server for React SPA
-  - [ ] Set `VITE_API_BASE_URL` pointing to the deployed backend
-- [ ] **8.3 Pilot Handover**
+See [Railway Deployment Runbook](guides/railway-deployment.md) for full instructions and variables mapping.
+
+- [x] **8.1 Backend Containerization & Deployment Setup**
+  - [x] Create multi-stage `backend/Dockerfile` with `uv` and Python 3.12
+  - [x] Integrate startup Alembic migrations hook (`uv run alembic upgrade head`)
+  - [x] Configure dynamic port binding (`--port ${PORT:-8000}`) and healthcheck (`/health`)
+  - [x] Add `backend/.dockerignore`
+- [x] **8.2 Frontend Containerization & SPA Routing Setup**
+  - [x] Create multi-stage `frontend/Dockerfile` (`node:22` builder + `nginx:alpine` runtime)
+  - [x] Configure build-time `VITE_*` environment variable arguments
+  - [x] Create `frontend/nginx.conf.template` with dynamic `${PORT}` substitution and SPA fallback (`try_files $uri $uri/ /index.html;`)
+  - [x] Add `frontend/.dockerignore`
+- [ ] **8.3 Railway Cloud Execution**
+  - [ ] Connect repository to Railway project
+  - [ ] Deploy backend service (`/backend`) & verify `/health`
+  - [ ] Deploy frontend service (`/frontend`) & wire `VITE_API_BASE_URL`
+  - [ ] Update backend `ALLOWED_ORIGINS` with frontend production domain
+- [ ] **8.4 Pilot Handover & Verification**
+  - [ ] Smoke test authentication, streaming, and citation drawer on production domains
   - [ ] Onboard pilot group (5 senior analysts) with Driftwood credentials
   - [ ] Validate 3-hour weekly intake time savings goal
+
