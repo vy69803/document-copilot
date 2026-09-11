@@ -224,11 +224,11 @@ See [Railway Deployment Runbook](guides/railway-deployment.md) for full instruct
   - [x] Configure build-time `VITE_*` environment variable arguments
   - [x] Create `frontend/nginx.conf.template` with dynamic `${PORT}` substitution and SPA fallback (`try_files $uri $uri/ /index.html;`)
   - [x] Add `frontend/.dockerignore`
-- [ ] **8.3 Railway Cloud Execution**
-  - [ ] Connect repository to Railway project
-  - [ ] Deploy backend service (`/backend`) & verify `/health`
-  - [ ] Deploy frontend service (`/frontend`) & wire `VITE_API_BASE_URL`
-  - [ ] Update backend `ALLOWED_ORIGINS` with frontend production domain
+- [x] **8.3 Railway Cloud Execution**
+  - [x] Connect repository to Railway project (`document-pilot` / `8617a728-86fd-4ad3-b712-ce489bc8b643`)
+  - [x] Deploy backend service (`/backend`) & verify `/health` (`https://document-copilot-backend-production-0fca.up.railway.app`)
+  - [x] Deploy frontend service (`/frontend`) & wire `VITE_API_BASE_URL` (`https://document-copilot-frontend-production-3f38.up.railway.app`)
+  - [x] Update backend `ALLOWED_ORIGINS` with frontend production domain
 - [ ] **8.4 Pilot Handover & Verification**
   - [ ] Smoke test authentication, streaming, and citation drawer on production domains
   - [ ] Onboard pilot group (5 senior analysts) with Driftwood credentials
